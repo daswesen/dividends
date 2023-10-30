@@ -1,6 +1,7 @@
 # Load necessary libraries
 library(shiny)
 library(ggplot2)
+library(plotly)
 
 # User Interface (UI)
 ui <- fluidPage(
@@ -12,6 +13,7 @@ ui <- fluidPage(
       sliderInput("dividendYield", "Dividend Yield (%):", min = 1, max = 20, value = 5, step = 0.1),
       sliderInput("cagr", "CAGR (%):", min = 0, max = 20, value = 5, step = 0.1),
       sliderInput("monthlyInvestment", "Monthly Investment (€):", min = 0, max = 10000, value = 100, step = 100),
+      sliderInput("numYears", "Number of Years:", min = 1, max = 50, value = 5),
       radioButtons("grossNet", "Dividend Type:", choices = c("Gross", "Net"), selected = "Gross"),
       numericInput("exemptAmount", "Yearly Exempt Amount (€):", value = 0, min = 0),
       checkboxInput("reinvest", "Reinvest Dividends?", value = FALSE),
@@ -19,7 +21,7 @@ ui <- fluidPage(
     ),
     
     mainPanel(
-      plotOutput("dividendPlot"),
+      plotlyOutput("dividendPlot"),
       tableOutput("dividendTable")
     )
   )
@@ -28,53 +30,71 @@ ui <- fluidPage(
 # Server Logic
 server <- function(input, output) {
   
-  # Define years and months
-  years <- 10
-  months <- years * 12
-  
   # Calculate dividends and other data
   calculateData <- reactive({
     taxRate <- 0.2638
+    months <- input$numYears * 12
     monthlyDividends <- rep(0, months)
     totalAmount <- rep(0, months)
     monthlyInvested <- rep(0, months)
     taxPaid <- rep(0, months)
     currentInvestment <- input$investedMoney
+    remainingExemptAmount <- input$exemptAmount
     
     for (i in 1:months) {
       monthlyDividend <- currentInvestment * (input$dividendYield / 100) / 12
-      taxPaid[i] <- max(monthlyDividend - input$exemptAmount/12, 0) * taxRate
-      netMonthlyDividend <- monthlyDividend - taxPaid[i]
+      
+      if (input$grossNet == "Net") {
+        taxFreeDividend <- min(monthlyDividend, remainingExemptAmount)
+        taxableDividend <- monthlyDividend - taxFreeDividend
+        taxPaid[i] <- taxableDividend * taxRate
+        netMonthlyDividend <- monthlyDividend - taxPaid[i]
+        remainingExemptAmount <- remainingExemptAmount - taxFreeDividend
+      } else {
+        netMonthlyDividend <- monthlyDividend
+        taxPaid[i] <- 0
+      }
       
       monthlyDividends[i] <- netMonthlyDividend
       totalAmount[i] <- currentInvestment
-      monthlyInvested[i] <- input$monthlyInvestment + (if (input$reinvest) netMonthlyDividend else 0)
+      if (input$reinvest) {
+        currentInvestment <- currentInvestment + netMonthlyDividend
+      }
       
+      monthlyInvested[i] <- input$monthlyInvestment
       currentInvestment <- currentInvestment + monthlyInvested[i]
-      currentInvestment <- currentInvestment * (1 + input$cagr/100/12)
+      
+      if (i > 12) {
+        currentInvestment <- currentInvestment * (1 + input$cagr/100/12)
+      }
+      
+      # Reset the exempt amount every year
+      if (i %% 12 == 0) {
+        remainingExemptAmount <- input$exemptAmount
+      }
     }
     
-    return(data.frame(Year = rep(1:years, each=12), Month = rep(1:12, times=years),
+    return(data.frame(Year = rep(1:input$numYears, each=12), Month = rep(1:12, times=input$numYears),
                       Dividend = monthlyDividends, Tax = taxPaid, Total = totalAmount, 
                       Invested = monthlyInvested))
   })
   
-  output$dividendPlot <- renderPlot({
+  output$dividendPlot <- renderPlotly({
     # Create a data frame for plotting
     data <- calculateData()
-    
     yearlyDividends <- aggregate(data$Dividend, by=list(Year=data$Year), FUN=sum)
     names(yearlyDividends) <- c("Year", "Dividend")
     
-    # Plot
-    ggplot(yearlyDividends, aes(x = Year, y = Dividend)) +
+    # Create a ggplot object
+    p <- ggplot(yearlyDividends, aes(x = Year, y = Dividend)) +
       geom_bar(stat = "identity", fill = "steelblue") +
-      geom_text(aes(label=sprintf("€%.2f", Dividend)), vjust=-0.5, color="black") +
       labs(title = "Dividends Growth", y = "Yearly Dividend (€)", x = "Year") +
       theme_minimal() +
-      scale_x_continuous(breaks = 1:years)
+      scale_x_continuous(breaks = 1:input$numYears)
+    
+    # Convert the ggplot object to a plotly object
+    ggplotly(p, tooltip = "y")
   })
-  
   
   output$dividendTable <- renderTable({
     # Display table with all the data
