@@ -1,0 +1,12 @@
+name: dividends
+title: dividends
+username: actionable-analytics
+account: actionable-analytics
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 10359461
+bundleId: 8716529
+url: https://actionable-analytics.shinyapps.io/dividends/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
